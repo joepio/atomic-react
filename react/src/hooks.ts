@@ -13,6 +13,7 @@ import {
   JSONValue,
 } from '@tomic/lib';
 import React from 'react';
+import { useDebounce } from './useDebounce';
 
 /**
  * Hook for getting and updating a Resource in a React component. Will try to
@@ -133,7 +134,7 @@ export function useProperty(subject: string): Property | null {
 type handleValidationErrorType = (
   val: JSVals,
   callback?: (e: Error) => unknown,
-) => void;
+) => Promise<void>;
 
 /**
  * Returns a Value (can be string, array, more or null) and a Setter. Value will
@@ -144,10 +145,14 @@ type handleValidationErrorType = (
 export function useValue(
   resource: Resource,
   propertyURL: string,
+  /** Saves the resource when the resource is changed, after 100ms */
+  commit?: boolean,
 ): [Value | null, handleValidationErrorType] {
   const [val, set] = useState<Value>(null);
   const store = useStore();
   const subject = resource.getSubject();
+  const debounced = useDebounce(val, 100);
+  const [touched, setTouched] = useState(false);
 
   // When a component mounts, it needs to let the store know that it will subscribe to changes to that resource.
   useEffect(() => {
@@ -163,14 +168,27 @@ export function useValue(
     };
   }, [store, resource, subject]);
 
+  // Save the resource when the debounced value has changed
+  useEffect(() => {
+    // Touched prevents the resource from being saved when it is simplely changed.
+    if (commit && touched) {
+      try {
+        resource.save(store);
+        setTouched(false);
+      } catch (e) {
+        store.handleError(e);
+      }
+    }
+  }, [debounced]);
+
   /**
    * Validates the value. If it fails, it calls the function in the second
    * Argument. Pass null to remove existing value.
    */
-  function validateAndSet(
+  async function validateAndSet(
     newVal: JSVals,
     handleValidationError?: (e: Error) => unknown,
-  ) {
+  ): Promise<void> {
     if (newVal == null) {
       // remove the value
       resource.removePropVal(propertyURL);
@@ -179,6 +197,7 @@ export function useValue(
     }
     const valFromNewVal = new Value(newVal as JSONValue);
     set(valFromNewVal);
+    setTouched(true);
 
     /**
      * Validates and sets a property / value combination. Will invoke the
@@ -188,12 +207,13 @@ export function useValue(
       try {
         await resource.set(propertyURL, newVal, store);
         handleValidationError && handleValidationError(null);
+        // commit && (await resource.save(store));
         store.notify(resource);
       } catch (e) {
-        handleValidationError && handleValidationError(e);
+        handleValidationError ? handleValidationError(e) : console.log(e);
       }
     }
-    setAsync();
+    await setAsync();
   }
 
   // If a value has already been set, return it.
@@ -209,7 +229,7 @@ export function useValue(
   try {
     value = resource.get(propertyURL);
   } catch (e) {
-    console.log(e);
+    store.handleError(e);
   }
   // If it didn't work, return null to be more explicit
   if (value == undefined) {
@@ -225,8 +245,12 @@ export function useValue(
 export function useString(
   resource: Resource,
   propertyURL: string,
-): [string | null, (string: string, handleValidationErrorType?) => void] {
-  const [val, setVal] = useValue(resource, propertyURL);
+  commit?: boolean,
+): [
+  string | null,
+  (string: string, handleValidationErrorType?) => Promise<void>,
+] {
+  const [val, setVal] = useValue(resource, propertyURL, commit);
   if (val == null) {
     return [null, setVal];
   }
@@ -262,8 +286,9 @@ export function useTitle(resource: Resource, truncateLength?: number): string {
 export function useArray(
   resource: Resource,
   propertyURL: string,
+  commit?: boolean,
 ): [string[] | null, handleValidationErrorType] {
-  const [value, set] = useValue(resource, propertyURL);
+  const [value, set] = useValue(resource, propertyURL, commit);
   if (value == null) {
     return [[], set];
   }
@@ -295,6 +320,7 @@ export function useBoolean(
 
 /** Hook for getting a stringified representation of an Atom in a React component */
 export function useDate(resource: Resource, propertyURL: string): Date | null {
+  const store = useStore();
   const [value] = useValue(resource, propertyURL);
   if (value == null) {
     return null;
@@ -302,7 +328,7 @@ export function useDate(resource: Resource, propertyURL: string): Date | null {
   try {
     return value.toDate();
   } catch (e) {
-    console.log(e);
+    store.handleError(e);
     return null;
   }
 }

@@ -141,12 +141,13 @@ function Collection({ resource }: CollectionProps): JSX.Element {
     <ContainerFull about={resource.getSubject()}>
       <Parent resource={resource} />
       <h1>{title}</h1>
+      {description && <Markdown text={description} />}
       <ButtonsBar>
         {totalPages > 1 && <Pagination />}
         <Button
           subtle
           onClick={handleToggleView}
-          title={`use ${nextDisplayStyle.id} view`}
+          title={`use ${nextDisplayStyle.id} view (v)`}
         >
           {nextDisplayStyle.icon}
         </Button>
@@ -175,7 +176,6 @@ function Collection({ resource }: CollectionProps): JSX.Element {
           </DropDownMini>
         )}
       </ButtonsBar>
-      {description && <Markdown text={description} />}
       {showClassDescription && valueFilter && (
         <>
           <Link subject={valueFilter}>
